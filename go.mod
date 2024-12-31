@@ -1,4 +1,4 @@
-module github.com/0xrth/MPAssetFinder
+module github.com/0xRTH/MPAssetFinder
 
 go 1.22.1
 
