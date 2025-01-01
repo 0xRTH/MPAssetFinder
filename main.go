@@ -28,6 +28,8 @@ var (
 	proxyFlag   = flag.String("proxy", "", "Proxy address (e.g., --proxy=127.0.0.1:8080)")
 	verboseFlag = flag.Bool("v", false, "Verbose output (print errors)")
 	imageFlag   = flag.Bool("img", false, "Include image assets in output")
+	anchorFlag  = flag.Bool("a", false, "Include anchor (a tag) URLs in output")
+	sourceFlag  = flag.Bool("s", false, "Show source URL for each asset")
 	client      *http.Client
 	bufferPool  = sync.Pool{
 		New: func() interface{} {
@@ -135,9 +137,13 @@ func worker(ctx context.Context, wg *sync.WaitGroup, workChan <-chan string, res
 	}
 }
 
-func safePrintln(s string) {
+func safePrintln(s string, sourceURL string) {
 	printMutex.Lock()
-	fmt.Println(s)
+	if *sourceFlag && sourceURL != "" {
+		fmt.Printf("%s | referrer: %s\n", s, sourceURL)
+	} else {
+		fmt.Println(s)
+	}
 	printMutex.Unlock()
 }
 
@@ -168,7 +174,7 @@ func isRelatedDomain(urlDomain, baseDomain string) bool {
 	return false
 }
 
-func checkAndPrintAnchor(urlStr string, domain string) {
+func checkAndPrintAnchor(urlStr string, domain string, sourceURL string) {
 	builder := bufferPool.Get().(*strings.Builder)
 	defer func() {
 		builder.Reset()
@@ -200,11 +206,11 @@ func checkAndPrintAnchor(urlStr string, domain string) {
 
 	// Only print if the domain is related
 	if isRelatedDomain(parsedURL.Host, domain) {
-		safePrintln(fullURL)
+		safePrintln(fullURL, sourceURL)
 	}
 }
 
-func checkAndPrint(urlStr string, domain string) {
+func checkAndPrint(urlStr string, domain string, sourceURL string) {
 	builder := bufferPool.Get().(*strings.Builder)
 	defer func() {
 		builder.Reset()
@@ -213,16 +219,16 @@ func checkAndPrint(urlStr string, domain string) {
 
 	switch {
 	case strings.HasPrefix(urlStr, "http"):
-		safePrintln(urlStr)
+		safePrintln(urlStr, sourceURL)
 	case strings.HasPrefix(urlStr, "//"):
 		builder.WriteString("https:")
 		builder.WriteString(urlStr)
-		safePrintln(builder.String())
+		safePrintln(builder.String(), sourceURL)
 	case strings.HasPrefix(urlStr, "/"):
 		builder.WriteString("https://")
 		builder.WriteString(domain)
 		builder.WriteString(urlStr)
-		safePrintln(builder.String())
+		safePrintln(builder.String(), sourceURL)
 	}
 }
 
@@ -284,7 +290,7 @@ func scrapeAssets(ctx context.Context, url string) error {
 			return fmt.Errorf("error fetching URL: %v", err)
 		}
 
-		checkAndPrint(fullURL, domain)
+		checkAndPrint(fullURL, domain, "")
 
 		// Store the last response
 		if finalResp != nil {
@@ -313,7 +319,7 @@ func scrapeAssets(ctx context.Context, url string) error {
 			}
 
 			// Print redirect URL
-			safePrintln(redirectURL)
+			safePrintln(redirectURL, fullURL)
 
 			// Prepare next request
 			req, err = http.NewRequestWithContext(ctx, "GET", redirectURL, nil)
@@ -366,7 +372,7 @@ func scrapeAssets(ctx context.Context, url string) error {
 				for _, attr := range n.Attr {
 					if attr.Key == "src" && attr.Val != "" {
 						if _, exists := seen[attr.Val]; !exists {
-							checkAndPrint(attr.Val, domain)
+							checkAndPrint(attr.Val, domain, fullURL)
 							seen[attr.Val] = struct{}{}
 						}
 					}
@@ -383,16 +389,18 @@ func scrapeAssets(ctx context.Context, url string) error {
 				}
 				if (rel == "stylesheet" || strings.Contains(rel, "font")) && href != "" {
 					if _, exists := seen[href]; !exists {
-						checkAndPrint(href, domain)
+						checkAndPrint(href, domain, fullURL)
 						seen[href] = struct{}{}
 					}
 				}
 			case "a":
-				for _, attr := range n.Attr {
-					if attr.Key == "href" && attr.Val != "" {
-						if _, exists := seen[attr.Val]; !exists {
-							checkAndPrintAnchor(attr.Val, domain)
-							seen[attr.Val] = struct{}{}
+				if *anchorFlag {
+					for _, attr := range n.Attr {
+						if attr.Key == "href" && attr.Val != "" {
+							if _, exists := seen[attr.Val]; !exists {
+								checkAndPrintAnchor(attr.Val, domain, fullURL)
+								seen[attr.Val] = struct{}{}
+							}
 						}
 					}
 				}
@@ -401,7 +409,7 @@ func scrapeAssets(ctx context.Context, url string) error {
 					for _, attr := range n.Attr {
 						if attr.Key == "src" && attr.Val != "" {
 							if _, exists := seen[attr.Val]; !exists {
-								checkAndPrint(attr.Val, domain)
+								checkAndPrint(attr.Val, domain, fullURL)
 								seen[attr.Val] = struct{}{}
 							}
 						}
