@@ -141,7 +141,70 @@ func safePrintln(s string) {
 	printMutex.Unlock()
 }
 
-func checkAndPrint(url string, domain string) {
+func isRelatedDomain(urlDomain, baseDomain string) bool {
+	// Convert to lowercase for comparison
+	urlDomain = strings.ToLower(urlDomain)
+	baseDomain = strings.ToLower(baseDomain)
+
+	// Check if domains are exactly the same
+	if urlDomain == baseDomain {
+		return true
+	}
+
+	// Check if URL is a subdomain of base domain
+	if strings.HasSuffix(urlDomain, "."+baseDomain) {
+		return true
+	}
+
+	// Get top level domain of base
+	parts := strings.Split(baseDomain, ".")
+	if len(parts) > 1 {
+		tld := parts[len(parts)-2] + "." + parts[len(parts)-1]
+		if strings.HasSuffix(urlDomain, "."+tld) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func checkAndPrintAnchor(urlStr string, domain string) {
+	builder := bufferPool.Get().(*strings.Builder)
+	defer func() {
+		builder.Reset()
+		bufferPool.Put(builder)
+	}()
+
+	var fullURL string
+	switch {
+	case strings.HasPrefix(urlStr, "http"):
+		fullURL = urlStr
+	case strings.HasPrefix(urlStr, "//"):
+		builder.WriteString("https:")
+		builder.WriteString(urlStr)
+		fullURL = builder.String()
+	case strings.HasPrefix(urlStr, "/"):
+		builder.WriteString("https://")
+		builder.WriteString(domain)
+		builder.WriteString(urlStr)
+		fullURL = builder.String()
+	default:
+		return // Skip invalid URLs
+	}
+
+	// Parse the URL to get its domain
+	parsedURL, err := url.Parse(fullURL)
+	if err != nil {
+		return
+	}
+
+	// Only print if the domain is related
+	if isRelatedDomain(parsedURL.Host, domain) {
+		safePrintln(fullURL)
+	}
+}
+
+func checkAndPrint(urlStr string, domain string) {
 	builder := bufferPool.Get().(*strings.Builder)
 	defer func() {
 		builder.Reset()
@@ -149,16 +212,16 @@ func checkAndPrint(url string, domain string) {
 	}()
 
 	switch {
-	case strings.HasPrefix(url, "http"):
-		safePrintln(url)
-	case strings.HasPrefix(url, "//"):
+	case strings.HasPrefix(urlStr, "http"):
+		safePrintln(urlStr)
+	case strings.HasPrefix(urlStr, "//"):
 		builder.WriteString("https:")
-		builder.WriteString(url)
+		builder.WriteString(urlStr)
 		safePrintln(builder.String())
-	case strings.HasPrefix(url, "/"):
+	case strings.HasPrefix(urlStr, "/"):
 		builder.WriteString("https://")
 		builder.WriteString(domain)
-		builder.WriteString(url)
+		builder.WriteString(urlStr)
 		safePrintln(builder.String())
 	}
 }
@@ -322,6 +385,15 @@ func scrapeAssets(ctx context.Context, url string) error {
 					if _, exists := seen[href]; !exists {
 						checkAndPrint(href, domain)
 						seen[href] = struct{}{}
+					}
+				}
+			case "a":
+				for _, attr := range n.Attr {
+					if attr.Key == "href" && attr.Val != "" {
+						if _, exists := seen[attr.Val]; !exists {
+							checkAndPrintAnchor(attr.Val, domain)
+							seen[attr.Val] = struct{}{}
+						}
 					}
 				}
 			case "img":
