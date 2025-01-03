@@ -174,7 +174,25 @@ func isRelatedDomain(urlDomain, baseDomain string) bool {
 	return false
 }
 
+func cleanURL(urlStr string) string {
+	// Remove any content after single quote or double quote
+	if idx := strings.IndexByte(urlStr, '\''); idx != -1 {
+		urlStr = urlStr[:idx]
+	}
+	if idx := strings.IndexByte(urlStr, '"'); idx != -1 {
+		urlStr = urlStr[:idx]
+	}
+
+	// Remove any content after whitespace
+	if idx := strings.IndexByte(urlStr, ' '); idx != -1 {
+		urlStr = urlStr[:idx]
+	}
+
+	return urlStr
+}
+
 func checkAndPrintAnchor(urlStr string, domain string, sourceURL string) {
+	urlStr = cleanURL(urlStr)
 	builder := bufferPool.Get().(*strings.Builder)
 	defer func() {
 		builder.Reset()
@@ -211,6 +229,7 @@ func checkAndPrintAnchor(urlStr string, domain string, sourceURL string) {
 }
 
 func checkAndPrint(urlStr string, domain string, sourceURL string) {
+	urlStr = cleanURL(urlStr)
 	builder := bufferPool.Get().(*strings.Builder)
 	defer func() {
 		builder.Reset()
